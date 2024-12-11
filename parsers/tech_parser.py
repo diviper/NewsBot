@@ -2,29 +2,31 @@ import requests
 from bs4 import BeautifulSoup
 
 def get_tech_news():
-    url = "https://rb.ru/tag/technology/"
+    url = "https://nplus1.ru/rubric/technology"
     response = requests.get(url)
     if response.status_code != 200:
         return []
 
     soup = BeautifulSoup(response.text, "lxml")
 
-    # Статьи в li.lenta__item
-    items = soup.find_all("li", class_="lenta__item", limit=10)
+    # Статьи в div.rubric-page__material
+    items = soup.find_all("div", class_="rubric-page__material", limit=10)
     news_list = []
     for item in items:
-        title_tag = item.find("a", class_="lenta__title")
-        if not title_tag:
+        a_tag = item.find("a", class_="rubric-page__link")
+        if not a_tag:
             continue
-        title = title_tag.get_text(strip=True)
-        news_url = title_tag.get("href", "")
+        title = a_tag.get_text(strip=True)
+        news_url = a_tag.get("href", "")
         if news_url and not news_url.startswith("http"):
-            news_url = "https://rb.ru" + news_url
+            news_url = "https://nplus1.ru" + news_url
 
-        date_tag = item.find("span", class_="lenta__date")
+        # Дата
+        date_tag = item.find("div", class_="rubric-page__info-date")
         date = date_tag.get_text(strip=True) if date_tag else None
 
-        img_tag = item.find("img", class_="lenta__image")
+        # Картинка
+        img_tag = item.find("img", class_="rubric-page__image")
         if img_tag:
             image_url = img_tag.get("src")
             if image_url.startswith("//"):
@@ -36,7 +38,7 @@ def get_tech_news():
             "title": title,
             "url": news_url,
             "image": image_url,
-            "likes": None,  # Здесь нет рейтинга, оставим None
+            "likes": None,
             "date": date
         })
 

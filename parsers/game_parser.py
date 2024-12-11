@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+import re
 
 def get_game_news():
     url = "https://www.playground.ru/news"
@@ -24,11 +25,13 @@ def get_game_news():
             news_url = "https://www.playground.ru" + news_url
 
         figure = post.find("figure", class_="post-image")
+        image_url = None
         if figure:
-            img_tag = figure.find("img")
-            image_url = img_tag.get("src") if img_tag else None
-        else:
-            image_url = None
+            style = figure.get("style", "")
+            # Попытка найти background-image
+            match = re.search(r'background-image:\s*url\("([^"]+)"\)', style)
+            if match:
+                image_url = match.group(1)
 
         meta_tag = post.find("div", class_="post-metadata")
         date = meta_tag.get_text(strip=True) if meta_tag else None

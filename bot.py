@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
 from config import BOT_TOKEN
 from parsers.tech_parser import get_tech_news
 from parsers.game_parser import get_game_news
@@ -11,9 +11,7 @@ dp = Dispatcher()
 
 news_data = {}
 current_index = {}
-message_ids = {}  # message_ids[(chat_id, category)] = message_id с текущей новостью
-
-# Заглушка для отсутствия картинки
+message_ids = {}
 default_image = "https://via.placeholder.com/600x400?text=No+Image"
 
 @dp.message(Command("start"))
@@ -41,13 +39,11 @@ async def cmd_refresh(message: types.Message):
     await message.answer("Обновляем категории новостей:", reply_markup=keyboard)
 
 def build_keyboard(url: str):
-    # Кнопки: Читать, Предыдущие, Следующие
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Читать", url=url)],
-        [
-            InlineKeyboardButton(text="Предыдущие", callback_data="prev"),
-            InlineKeyboardButton(text="Следующие", callback_data="next")
-        ]
+        [InlineKeyboardButton(text="Читать", url=url),
+         InlineKeyboardButton(text="Читать здесь", web_app=WebAppInfo(url=url))],
+        [InlineKeyboardButton(text="Предыдущие", callback_data="prev"),
+         InlineKeyboardButton(text="Следующие", callback_data="next")]
     ])
 
 async def send_news(chat_id: int, category: str, index: int):
@@ -55,6 +51,7 @@ async def send_news(chat_id: int, category: str, index: int):
     if not all_news:
         return
 
+    # Зацикливание
     if index < 0:
         index = len(all_news) - 1
     elif index >= len(all_news):
@@ -69,7 +66,6 @@ async def send_news(chat_id: int, category: str, index: int):
     rating = news.get("likes", None)
     image = news.get("image", None) or default_image
 
-    # Формируем текст
     parts = [f"<b>{title}</b>"]
     if date:
         parts.append(f"Дата: {date}")
@@ -85,7 +81,7 @@ async def send_news(chat_id: int, category: str, index: int):
         sent = await bot.send_photo(chat_id=chat_id, photo=image, caption=caption, parse_mode="HTML", reply_markup=kb)
         message_ids[(chat_id, category)] = sent.message_id
     else:
-        # Редактируем существующее сообщение
+        # Редактируем существующее
         media = InputMediaPhoto(media=image, caption=caption, parse_mode="HTML")
         await bot.edit_message_media(chat_id=chat_id, message_id=msg_id, media=media, reply_markup=kb)
 
@@ -101,7 +97,7 @@ async def category_callback(callback: types.CallbackQuery):
 
     news_data[(chat_id, category)] = all_news
     current_index[(chat_id, category)] = 0
-    message_ids.pop((chat_id, category), None)  # сбрасываем сообщение
+    message_ids.pop((chat_id, category), None)
 
     await callback.answer()
 
@@ -112,16 +108,8 @@ async def category_callback(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data in ["prev", "next"])
 async def pagination_callback(callback: types.CallbackQuery):
-    # Определяем категорию по сохраненным данным:
     chat_id = callback.message.chat.id
-
-    # Нужно выяснить, какая категория сейчас активна. Допустим, у нас может быть сразу две?
-    # Ориентируемся на то, что пользователь сначала выбирает категорию. Можно хранить текущую категорию.
-    # Считаем, что у пользователя активна только одна категория. Тогда берем последнюю записанную.
-    # Для надежности можно хранить текущую категорию отдельно.
-    # Для упрощения возьмём категорию ту, которая есть в message_ids и текущих индексах.
-
-    # Попытаемся определить категорию:
+    # Определяем категорию
     possible_categories = ["tech", "game"]
     active_category = None
     for cat in possible_categories:
