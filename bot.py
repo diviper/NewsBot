@@ -1,6 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from parsers.ai_parser import get_ai_news
 from parsers.game_parser import get_game_news
 
@@ -16,12 +16,10 @@ async def cmd_start(message: types.Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
-    await message.answer("Используй /start, чтобы начать. Нажми на нужную кнопку, чтобы увидеть последние новости.\n"
-                         "Используй /refresh, чтобы снова выбрать категорию новостей.")
+    await message.answer("Используй /start или /refresh, чтобы выбрать категорию новостей.")
 
 @router.message(Command("refresh"))
 async def cmd_refresh(message: types.Message):
-    # Повторяем логику из /start
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="AI новости", callback_data="ai_news")],
         [InlineKeyboardButton(text="Игровые новости", callback_data="game_news")]
@@ -42,17 +40,26 @@ async def news_callback(callback: types.CallbackQuery):
             title = news.get("title", "Без заголовка")
             url = news.get("url", "")
             image = news.get("image", None)
-            
-            # Создаем кнопку для перехода по ссылке
+
+            # Используем web_app для открытия ссылки в мини-приложении (WebApp)
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Читать", url=url)]
+                [InlineKeyboardButton(text="Читать", web_app=WebAppInfo(url=url))]
             ])
-            
+
             if image:
-                # Отправляем фото с заголовком и кнопкой
-                await callback.message.answer_photo(photo=image, caption=title, reply_markup=keyboard)
+                caption = title
+                # Добавим рейтинг в подпись, если он есть:
+                rating = news.get("likes", "0")
+                if rating and rating != "0":
+                    caption = f"{title}\nРейтинг: {rating}"
+                await callback.message.answer_photo(photo=image, caption=caption, reply_markup=keyboard)
             else:
-                # Отправляем просто заголовок и кнопку
-                await callback.message.answer(text=title, reply_markup=keyboard)
+                # Если нет картинки, отправим просто текст с рейтингом, если он не ноль
+                rating = news.get("likes", "0")
+                if rating and rating != "0":
+                    text = f"{title}\nРейтинг: {rating}"
+                else:
+                    text = title
+                await callback.message.answer(text=text, reply_markup=keyboard)
 
     await callback.answer()
