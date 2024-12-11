@@ -1,5 +1,4 @@
-
-aiogram==3.0.0b7
-aiohttp==3.8.5
-beautifulsoup4==4.12.2
-python-dotenv==1.0.0
+aiogram
+requests
+beautifulsoup4
+lxml
