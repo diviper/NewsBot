@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
@@ -6,127 +7,149 @@ from config import BOT_TOKEN
 from parsers.tech_parser import get_tech_news
 from parsers.game_parser import get_game_news
 
+# Настройка логирования
+logging.basicConfig(
+    filename="debug.log",
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 news_data = {}
 current_index = {}
-message_ids = {}
 default_image = "https://via.placeholder.com/600x400?text=No+Image"
 
+# Главное меню
+def get_main_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Технологии", callback_data="tech_news")],
+        [InlineKeyboardButton(text="Игровые новости", callback_data="game_news")]
+    ])
+
+# Кнопки управления новостями
+def get_news_keyboard(category, url):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Читать тут", web_app=WebAppInfo(url=url))],
+        [InlineKeyboardButton(text="Предыдущая", callback_data=f"prev_{category}"),
+         InlineKeyboardButton(text="Следующая", callback_data=f"next_{category}")],
+        [InlineKeyboardButton(text="Меню", callback_data="menu")]
+    ])
+
+# Команда /start
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Технологии", callback_data="tech_news")],
-        [InlineKeyboardButton(text="Игровые новости", callback_data="game_news")]
-    ])
-    await message.answer("Привет! Выбери категорию:", reply_markup=keyboard)
+    logging.info("Пользователь вызвал /start")
+    await message.answer("Привет! Выбери категорию:", reply_markup=get_main_menu())
 
+# Команда /help
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
+    logging.info("Пользователь вызвал /help")
     await message.answer("Команды:\n"
-                         "/start - начать выбор категории\n"
-                         "/refresh - заново выбрать категорию\n\n"
-                         "После выбора категории будет показана одна новость. "
-                         "Используй кнопки 'Предыдущие' и 'Следующие' для переключения между новостями.")
+                         "/start - Главное меню\n"
+                         "/help - Показать это сообщение\n\n"
+                         "Выбери категорию для просмотра новостей.")
 
-@dp.message(Command("refresh"))
-async def cmd_refresh(message: types.Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Технологии", callback_data="tech_news")],
-        [InlineKeyboardButton(text="Игровые новости", callback_data="game_news")]
-    ])
-    await message.answer("Обновляем категории новостей:", reply_markup=keyboard)
+# Показ главного меню (по кнопке "Меню")
+@dp.callback_query(lambda c: c.data == "menu")
+async def show_menu(callback: types.CallbackQuery):
+    logging.info("Пользователь вернулся в меню")
+    try:
+        await callback.message.edit_text("Выбери категорию:", reply_markup=get_main_menu())
+    except Exception as e:
+        logging.error(f"Ошибка при возвращении в меню: {e}")
+        await callback.message.answer("Выбери категорию:", reply_markup=get_main_menu())
+    finally:
+        await callback.answer()
 
-def build_keyboard(url: str):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Читать", url=url),
-         InlineKeyboardButton(text="Читать здесь", web_app=WebAppInfo(url=url))],
-        [InlineKeyboardButton(text="Предыдущие", callback_data="prev"),
-         InlineKeyboardButton(text="Следующие", callback_data="next")]
-    ])
-
-async def send_news(chat_id: int, category: str, index: int):
-    all_news = news_data.get((chat_id, category), [])
+# Функция отображения новости
+async def show_news(callback: types.CallbackQuery, category: str, index: int):
+    all_news = news_data.get(category, [])
     if not all_news:
+        logging.warning(f"В категории {category} нет новостей.")
+        await callback.message.edit_text("Новостей не найдено. Попробуйте позже.", reply_markup=get_main_menu())
         return
 
+    # Зацикливание индекса
     if index < 0:
         index = len(all_news) - 1
     elif index >= len(all_news):
         index = 0
+    current_index[category] = index
 
-    current_index[(chat_id, category)] = index
+    # Данные текущей новости
     news = all_news[index]
+    logging.debug(f"Показ новости {index}: {news}")
 
-    title = news.get("title", "Без заголовка")
+    title = news.get("title", "Нет заголовка")
     url = news.get("url", "#")
-    date = news.get("date", "")
-    rating = news.get("likes", None)
-    image = news.get("image", None) or default_image
+    image = news.get("image", default_image)
+    date = news.get("date", "Не указана")
 
-    parts = [f"<b>{title}</b>"]
-    if date:
-        parts.append(f"Дата: {date}")
-    if rating:
-        parts.append(f"Рейтинг: {rating}")
-    caption = "\n".join(parts)
+    caption = f"<b>{title}</b>\n\nДата: {date}\n\n<a href='{url}'>Читать полностью</a>"
+    keyboard = get_news_keyboard(category, url)
 
-    kb = build_keyboard(url)
-
-    msg_id = message_ids.get((chat_id, category), None)
-    if msg_id is None:
-        sent = await bot.send_photo(chat_id=chat_id, photo=image, caption=caption, parse_mode="HTML", reply_markup=kb)
-        message_ids[(chat_id, category)] = sent.message_id
-    else:
-        media = InputMediaPhoto(media=image, caption=caption, parse_mode="HTML")
-        await bot.edit_message_media(chat_id=chat_id, message_id=msg_id, media=media, reply_markup=kb)
-
-@dp.callback_query(lambda c: c.data in ["tech_news", "game_news"])
-async def category_callback(callback: types.CallbackQuery):
-    category = "tech" if callback.data == "tech_news" else "game"
-    chat_id = callback.message.chat.id
-
-    if category == "tech":
-        all_news = get_tech_news()
-    else:
-        all_news = get_game_news()
-
-    news_data[(chat_id, category)] = all_news
-    current_index[(chat_id, category)] = 0
-    message_ids.pop((chat_id, category), None)
+    try:
+        # Если сообщение содержит медиа (например, фото)
+        if callback.message.photo:
+            await callback.message.edit_media(
+                media=InputMediaPhoto(media=image, caption=caption, parse_mode="HTML"),
+                reply_markup=keyboard
+            )
+        else:
+            # Если сообщение текстовое
+            await callback.message.edit_text(caption, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Ошибка при показе новости: {e}")
+        await callback.message.answer_photo(photo=image, caption=caption, parse_mode="HTML", reply_markup=keyboard)
 
     await callback.answer()
 
-    if all_news:
-        await send_news(chat_id, category, 0)
-    else:
-        await callback.message.answer("Новостей не найдено.")
+# Загрузка новостей
+@dp.callback_query(lambda c: c.data in ["tech_news", "game_news"])
+async def load_news(callback: types.CallbackQuery):
+    category = callback.data
+    logging.info(f"Загрузка новостей для категории: {category}")
 
-@dp.callback_query(lambda c: c.data in ["prev", "next"])
-async def pagination_callback(callback: types.CallbackQuery):
-    chat_id = callback.message.chat.id
-    possible_categories = ["tech", "game"]
-    active_category = None
-    for cat in possible_categories:
-        if (chat_id, cat) in news_data and news_data[(chat_id, cat)]:
-            active_category = cat
-            break
+    # Загрузка новостей
+    if category == "tech_news":
+        news_data[category] = get_tech_news()
+    elif category == "game_news":
+        news_data[category] = get_game_news()
 
-    if not active_category:
-        await callback.answer("Категория не определена.")
+    logging.debug(f"Новости для {category}: {news_data[category]}")
+
+    if not news_data[category]:
+        logging.warning(f"Новости для {category} не найдены.")
+        await callback.message.edit_text("К сожалению, новости не найдены. Попробуйте позже.",
+                                         reply_markup=get_main_menu())
         return
 
-    idx = current_index.get((chat_id, active_category), 0)
-    if callback.data == "next":
-        idx += 1
-    else:
-        idx -= 1
+    current_index[category] = 0
+    await show_news(callback, category, 0)
 
-    await callback.answer()
-    await send_news(chat_id, active_category, idx)
+# Переключение новостей
+@dp.callback_query(lambda c: c.data.startswith("prev_") or c.data.startswith("next_"))
+async def paginate_news(callback: types.CallbackQuery):
+    try:
+        action, category = callback.data.split("_", 1)  # Учитываем, что данные могут содержать больше одного "_"
+        current_idx = current_index.get(category, 0)
 
+        if action == "prev":
+            current_idx -= 1
+        elif action == "next":
+            current_idx += 1
+
+        logging.info(f"Переключение новости: {action} (индекс {current_idx})")
+        await show_news(callback, category, current_idx)
+    except Exception as e:
+        logging.error(f"Ошибка в переключении новостей: {e}")
+
+# Главный обработчик
 async def main():
+    logging.info("Запуск бота")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
