@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from config import BOT_TOKEN
 from parsers.tech_parser import get_tech_news
 from parsers.game_parser import get_game_news
@@ -9,9 +9,12 @@ from parsers.game_parser import get_game_news
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилища данных (в памяти)
-news_data = {}      # news_data[(chat_id, category)] = список новостей
-current_index = {}  # current_index[(chat_id, category)] = текущий индекс новостей
+news_data = {}
+current_index = {}
+message_ids = {}  # message_ids[(chat_id, category)] = message_id с текущей новостью
+
+# Заглушка для отсутствия картинки
+default_image = "https://via.placeholder.com/600x400?text=No+Image"
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -25,8 +28,9 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer("Команды:\n"
                          "/start - начать выбор категории\n"
-                         "/refresh - заново выбрать категорию\n"
-                         "После выбора категории можно листать новости по 2 за раз, используя кнопки 'Предыдущие' и 'Следующие'.")
+                         "/refresh - заново выбрать категорию\n\n"
+                         "После выбора категории будет показана одна новость. "
+                         "Используй кнопки 'Предыдущие' и 'Следующие' для переключения между новостями.")
 
 @dp.message(Command("refresh"))
 async def cmd_refresh(message: types.Message):
@@ -36,49 +40,54 @@ async def cmd_refresh(message: types.Message):
     ])
     await message.answer("Обновляем категории новостей:", reply_markup=keyboard)
 
-async def show_news_block(message: types.Message, category: str, chat_id: int):
-    all_news = news_data.get((chat_id, category), [])
-    if not all_news:
-        await message.answer("Новостей не найдено.")
-        return
-
-    idx = current_index.get((chat_id, category), 0)
-    block = all_news[idx:idx+2]
-
-    # Кнопки листания
-    control_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+def build_keyboard(url: str):
+    # Кнопки: Читать, Предыдущие, Следующие
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Читать", url=url)],
         [
-            InlineKeyboardButton(text="Предыдущие", callback_data=f"{category}_prev"),
-            InlineKeyboardButton(text="Следующие", callback_data=f"{category}_next")
+            InlineKeyboardButton(text="Предыдущие", callback_data="prev"),
+            InlineKeyboardButton(text="Следующие", callback_data="next")
         ]
     ])
 
-    # Отправляем по 2 новости
-    for news in block:
-        title = news.get("title", "Без заголовка")
-        url = news.get("url", "")
-        image = news.get("image", None)
-        date = news.get("date", "")
-        rating = news.get("likes", None)
+async def send_news(chat_id: int, category: str, index: int):
+    all_news = news_data.get((chat_id, category), [])
+    if not all_news:
+        return
 
-        # Формируем текст: Заголовок, Дата, Рейтинг (если есть)
-        text_parts = [f"<b>{title}</b>"]
-        if date:
-            text_parts.append(f"Дата: {date}")
-        if rating:
-            text_parts.append(f"Рейтинг: {rating}")
-        text = "\n".join(text_parts)
+    if index < 0:
+        index = len(all_news) - 1
+    elif index >= len(all_news):
+        index = 0
 
-        link_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Читать", url=url)]
-        ])
+    current_index[(chat_id, category)] = index
+    news = all_news[index]
 
-        if image:
-            await message.answer_photo(photo=image, caption=text, parse_mode="HTML", reply_markup=link_keyboard)
-        else:
-            await message.answer(text, parse_mode="HTML", reply_markup=link_keyboard)
+    title = news.get("title", "Без заголовка")
+    url = news.get("url", "#")
+    date = news.get("date", "")
+    rating = news.get("likes", None)
+    image = news.get("image", None) or default_image
 
-    await message.answer("Листайте новости:", reply_markup=control_keyboard)
+    # Формируем текст
+    parts = [f"<b>{title}</b>"]
+    if date:
+        parts.append(f"Дата: {date}")
+    if rating:
+        parts.append(f"Рейтинг: {rating}")
+    caption = "\n".join(parts)
+
+    kb = build_keyboard(url)
+
+    msg_id = message_ids.get((chat_id, category), None)
+    if msg_id is None:
+        # Отправляем новое сообщение
+        sent = await bot.send_photo(chat_id=chat_id, photo=image, caption=caption, parse_mode="HTML", reply_markup=kb)
+        message_ids[(chat_id, category)] = sent.message_id
+    else:
+        # Редактируем существующее сообщение
+        media = InputMediaPhoto(media=image, caption=caption, parse_mode="HTML")
+        await bot.edit_message_media(chat_id=chat_id, message_id=msg_id, media=media, reply_markup=kb)
 
 @dp.callback_query(lambda c: c.data in ["tech_news", "game_news"])
 async def category_callback(callback: types.CallbackQuery):
@@ -92,43 +101,50 @@ async def category_callback(callback: types.CallbackQuery):
 
     news_data[(chat_id, category)] = all_news
     current_index[(chat_id, category)] = 0
+    message_ids.pop((chat_id, category), None)  # сбрасываем сообщение
 
     await callback.answer()
-    await show_news_block(callback.message, category, chat_id)
 
-@dp.callback_query(lambda c: c.data.endswith("_prev") or c.data.endswith("_next"))
+    if all_news:
+        await send_news(chat_id, category, 0)
+    else:
+        await callback.message.answer("Новостей не найдено.")
+
+@dp.callback_query(lambda c: c.data in ["prev", "next"])
 async def pagination_callback(callback: types.CallbackQuery):
-    data = callback.data
-    parts = data.split("_")
-    category = parts[0]
-    direction = parts[1]
+    # Определяем категорию по сохраненным данным:
     chat_id = callback.message.chat.id
 
-    all_news = news_data.get((chat_id, category), [])
-    if not all_news:
-        await callback.message.answer("Новостей не найдено.")
-        await callback.answer()
+    # Нужно выяснить, какая категория сейчас активна. Допустим, у нас может быть сразу две?
+    # Ориентируемся на то, что пользователь сначала выбирает категорию. Можно хранить текущую категорию.
+    # Считаем, что у пользователя активна только одна категория. Тогда берем последнюю записанную.
+    # Для надежности можно хранить текущую категорию отдельно.
+    # Для упрощения возьмём категорию ту, которая есть в message_ids и текущих индексах.
+
+    # Попытаемся определить категорию:
+    possible_categories = ["tech", "game"]
+    active_category = None
+    for cat in possible_categories:
+        if (chat_id, cat) in news_data and news_data[(chat_id, cat)]:
+            active_category = cat
+            break
+
+    if not active_category:
+        await callback.answer("Категория не определена.")
         return
 
-    idx = current_index.get((chat_id, category), 0)
-    step = 2
-
-    if direction == "next":
-        idx += step
-        if idx >= len(all_news):
-            idx = 0
-    else:  # prev
-        idx -= step
-        if idx < 0:
-            # Переход к концу списка по 2 элемента:
-            # idx должен сдвинуться так, чтобы показывать последний блок из 2 новостей
-            remainder = len(all_news) % step
-            if remainder == 0:
-                idx = len(all_news) - step
-            else:
-                idx = len(all_news) - remainder
-
-    current_index[(chat_id, category)] = idx
+    idx = current_index.get((chat_id, active_category), 0)
+    if callback.data == "next":
+        idx += 1
+    else:
+        idx -= 1
 
     await callback.answer()
-    await show_news_block(callback.message, category, chat_id)
+    await send_news(chat_id, active_category, idx)
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())

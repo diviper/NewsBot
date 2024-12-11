@@ -8,9 +8,6 @@ def get_game_news():
         return []
 
     soup = BeautifulSoup(response.text, "lxml")
-
-    # Ищем блоки постов. Согласно предыдущей логике - div с классом "post"
-    # Выберем 10 новостей (чтобы было, что листать)
     posts = soup.find_all("div", class_="post", limit=10)
     news_list = []
 
@@ -26,34 +23,20 @@ def get_game_news():
         if news_url and not news_url.startswith("http"):
             news_url = "https://www.playground.ru" + news_url
 
-        # Картинка
-        # Попытка: images могут быть в figure.post-image > img
         figure = post.find("figure", class_="post-image")
         if figure:
             img_tag = figure.find("img")
-            if img_tag:
-                image_url = img_tag.get("src")
-            else:
-                image_url = None
+            image_url = img_tag.get("src") if img_tag else None
         else:
             image_url = None
 
-        # Дата
-        # Судя по скриншоту, дата находится в div.post-metadata, там может быть текст типа "вчера в 20:13 | Обновления"
         meta_tag = post.find("div", class_="post-metadata")
-        if meta_tag:
-            date = meta_tag.get_text(strip=True)
-        else:
-            date = None
+        date = meta_tag.get_text(strip=True) if meta_tag else None
 
-        # Рейтинг
         rating_tag = post.find("span", class_="post-rating-counter")
         if rating_tag:
             value_tag = rating_tag.find("span", class_="value")
-            if value_tag:
-                rating = value_tag.get_text(strip=True)
-            else:
-                rating = rating_tag.get("title", None)
+            rating = value_tag.get_text(strip=True) if value_tag else rating_tag.get("title", None)
         else:
             rating = None
 
