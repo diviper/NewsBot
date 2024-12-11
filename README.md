@@ -35,3 +35,4 @@ python main.py
 - Aiogram
 - BeautifulSoup
 - aiohttp
+# NewsBot
