@@ -1,11 +1,11 @@
-# main.py
 import asyncio
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, DefaultBotProperties
 from config import BOT_TOKEN
 from bot import router
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+    # Указываем parse_mode через DefaultBotProperties
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.include_router(router)
 
