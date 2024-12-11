@@ -51,7 +51,6 @@ async def send_news(chat_id: int, category: str, index: int):
     if not all_news:
         return
 
-    # Зацикливание
     if index < 0:
         index = len(all_news) - 1
     elif index >= len(all_news):
@@ -77,11 +76,9 @@ async def send_news(chat_id: int, category: str, index: int):
 
     msg_id = message_ids.get((chat_id, category), None)
     if msg_id is None:
-        # Отправляем новое сообщение
         sent = await bot.send_photo(chat_id=chat_id, photo=image, caption=caption, parse_mode="HTML", reply_markup=kb)
         message_ids[(chat_id, category)] = sent.message_id
     else:
-        # Редактируем существующее
         media = InputMediaPhoto(media=image, caption=caption, parse_mode="HTML")
         await bot.edit_message_media(chat_id=chat_id, message_id=msg_id, media=media, reply_markup=kb)
 
@@ -109,7 +106,6 @@ async def category_callback(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data in ["prev", "next"])
 async def pagination_callback(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-    # Определяем категорию
     possible_categories = ["tech", "game"]
     active_category = None
     for cat in possible_categories:
