@@ -16,7 +16,7 @@ async def cmd_start(message: types.Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
-    await message.answer("Используй /start, чтобы начать. Выбери категорию новостей. Нажми на нужную кнопку, чтобы увидеть последние новости.\n"
+    await message.answer("Используй /start, чтобы начать. Нажми на нужную кнопку, чтобы увидеть последние новости.\n"
                          "Используй /refresh, чтобы снова выбрать категорию новостей.")
 
 @router.message(Command("refresh"))
@@ -41,13 +41,18 @@ async def news_callback(callback: types.CallbackQuery):
         for news in news_list:
             title = news.get("title", "Без заголовка")
             url = news.get("url", "")
-            likes = news.get("likes", 0)
             image = news.get("image", None)
-            text = f"<b>{title}</b>\nСсылка: {url}\nЛайков: {likes}"
-
+            
+            # Создаем кнопку для перехода по ссылке
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Читать", url=url)]
+            ])
+            
             if image:
-                await callback.message.answer_photo(image, caption=text, parse_mode="HTML")
+                # Отправляем фото с заголовком и кнопкой
+                await callback.message.answer_photo(photo=image, caption=title, reply_markup=keyboard)
             else:
-                await callback.message.answer(text, parse_mode="HTML")
+                # Отправляем просто заголовок и кнопку
+                await callback.message.answer(text=title, reply_markup=keyboard)
 
     await callback.answer()
